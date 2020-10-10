@@ -2,10 +2,12 @@ import argparse
 import logging as log
 import os
 import sys
-
 import cv2
 from exitstatus import ExitStatus
-
+from updateDBModule import insert
+from recordvideo import RecordVideoSource
+from export import SaveIntoFile
+from emailModule import send_email
 from openvino.inference_engine import IENetwork, IEPlugin
 
 JOINT_COLORS = [
@@ -18,7 +20,6 @@ JOINT_COLORS = [
 
 """
 Pose Data Points
-
 Nose 0, Neck 1, Right Shoulder 2, Right Elbow 3, Right Wrist 4,
 Left Shoulder 5, Left Elbow 6, Left Wrist 7, Right Hip 8,
 Right Knee 9, Right Ankle 10, Left Hip 11, Left Knee 12,
@@ -86,7 +87,7 @@ def parse_args(parse_this=None) -> argparse.Namespace:
     return parser.parse_args(parse_this)
 
 
-def main():
+def main(aId, aLocation):
     """Accept arguments and perform the inference on entry"""
     # Setup log config
     log.basicConfig(
@@ -165,9 +166,11 @@ def main():
     previous_head_detection_frame = 0
     last_fall_detected_frame = 0
     # Fall Detection threshold speed is depedent of the frame height
-    fall_threshold = 0.04 * height
+    fall_threshold = 0.05 * height
     framerate_threshold = round(fps/5.0)
     fall_detected_text_position = (20, round(0.15*height))
+
+    Fall_Confidence = 0
 
     ret, frame = cap.read()
     frame_number = 0
@@ -185,7 +188,9 @@ def main():
     else:
         log.info("Evaluating webcam stream...")
 
-    while cap.isOpened():
+    fallHappened = False
+
+    while cap.isOpened() and fallHappened==False:
         ret, next_frame = cap.read()
         if not ret:
             break
@@ -270,6 +275,8 @@ def main():
                     (frame_number - previous_head_detection_frame) <
                         framerate_threshold
                 ):
+                    Fall_Confidence = head_avg_position - previous_head_avg_position
+                    print("System detected a fall with " + str(Fall_Confidence) + "% confidence")
                     # print("Fall detected.")
                     last_fall_detected_frame = frame_number
 
@@ -291,6 +298,8 @@ def main():
                     font_thickness,
                     cv2.LINE_AA
                 )
+                fallHappened = True
+                
 
         # If webcam mode
         if out_file:
@@ -307,7 +316,10 @@ def main():
         key = cv2.waitKey(1)
         if key == 27:
             break
-
+    if(fallHappened):
+        insert(aId,aLocation)
+        send_email("alvinsim74@gmail.com","Fall Detected","A fall has been reported by Bot " + str(botID) + " with " + str(Fall_Confidence) + "% confidence.\n The bot is stationed at " + str(aLocation))
+        
     if out_file:
         # Release the out writer, capture, and destroy any OpenCV windows
         out_file.release()
@@ -320,4 +332,16 @@ def main():
     return ExitStatus.success
 
 if __name__ == '__main__':
-    sys.exit(main())
+    botID = int(input("Enter Bot ID: "))
+    botLocation = input("Enter bot stationed: ")
+    while True:
+        userChoice = int(input("[1] Start Detection [2] Export Database [3] Exit: "))
+        if(userChoice==1):
+            #RecordVideoSource()
+            main(botID,botLocation)
+        elif (userChoice==2):
+            print("Exporting to Excel File")
+            SaveIntoFile()
+        else:
+            break
+        
